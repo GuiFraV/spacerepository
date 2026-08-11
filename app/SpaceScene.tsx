@@ -7,6 +7,7 @@ import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.j
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
 const MODEL_URL = "/models/voyager.glb";
@@ -101,7 +102,7 @@ function createFlowTrails(count: number, segments: number): FlowTrails {
   for (let i = 0; i < count; i += 1) {
     radii[i] = 1.62 + Math.pow(Math.random(), 1.55) * 6.3;
     flatten[i] = THREE.MathUtils.randFloat(0.09, 0.3);
-    speeds[i] = (1.15 / Math.pow(radii[i], 1.35)) * THREE.MathUtils.randFloat(0.7, 1.4);
+    speeds[i] = (1.7 / Math.pow(radii[i], 1.75)) * THREE.MathUtils.randFloat(0.7, 1.4);
     phases[i] = THREE.MathUtils.randFloat(0, Math.PI * 2);
     lens[i] = THREE.MathUtils.randFloat(0.03, 0.1);
     spans[i] = THREE.MathUtils.randFloat(0.7, 1.35);
@@ -209,7 +210,7 @@ function createDustDisk(count: number, size: number, texture: THREE.Texture | nu
   for (let i = 0; i < count; i += 1) {
     radii[i] = 1.66 + Math.pow(Math.random(), 1.45) * 7.2;
     angles[i] = THREE.MathUtils.randFloat(0, Math.PI * 2);
-    speeds[i] = (1.0 / Math.pow(radii[i], 1.3)) * THREE.MathUtils.randFloat(0.6, 1.4) * (Math.random() > 0.05 ? 1 : -1);
+    speeds[i] = (1.5 / Math.pow(radii[i], 1.7)) * THREE.MathUtils.randFloat(0.6, 1.4) * (Math.random() > 0.05 ? 1 : -1);
     flatten[i] = THREE.MathUtils.randFloat(0.1, 0.32);
     lifts[i] = THREE.MathUtils.randFloat(0.02, 0.1);
     depths[i] = THREE.MathUtils.randFloatSpread(0.5) - 0.1;
@@ -371,8 +372,8 @@ function createNebulaTexture() {
       const cloud = Math.exp(-(nx * nx * 2.4 + ny * ny * 8.5));
       const filaments = 0.55 + 0.45 * Math.sin(nx * 44 + Math.sin(ny * 18) * 2.2);
       const noise = Math.random() * 0.28 + filaments * 0.72;
-      const edgeX = Math.min(1, Math.max(0, (0.5 - Math.abs(nx)) * 10));
-      const edgeY = Math.min(1, Math.max(0, (0.5 - Math.abs(ny)) * 10));
+      const edgeX = Math.min(1, Math.max(0, (0.5 - Math.abs(nx)) * 4));
+      const edgeY = Math.min(1, Math.max(0, (0.5 - Math.abs(ny)) * 4));
       const alpha = Math.min(1, ridge * cloud * noise * edgeX * edgeY * 1.35);
       const index = (y * canvas.width + x) * 4;
       data[index] = 255;
@@ -477,8 +478,81 @@ export function SpaceScene() {
     composer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     composer.setSize(mount.clientWidth, mount.clientHeight);
     composer.addPass(new RenderPass(scene, camera));
+    const lensingPass = new ShaderPass({
+      uniforms: {
+        tDiffuse: { value: null },
+        uCenter: { value: new THREE.Vector2(0.66, 0.68) },
+        uRadius: { value: 0.1 },
+        uStrength: { value: 0 },
+        uAspect: { value: mount.clientWidth / mount.clientHeight },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D tDiffuse;
+        uniform vec2 uCenter;
+        uniform float uRadius;
+        uniform float uStrength;
+        uniform float uAspect;
+        varying vec2 vUv;
+
+        vec2 distort(vec2 uv, float k) {
+          vec2 d = uv - uCenter;
+          d.x *= uAspect;
+          float r = length(d);
+          float pull = k * uRadius * uRadius / max(r, uRadius * 0.35);
+          float inner = smoothstep(uRadius * 0.3, uRadius * 0.9, r);
+          vec2 dir = d / max(r, 1e-4);
+          vec2 offset = -dir * pull * inner;
+          offset.x /= uAspect;
+          return uv + offset;
+        }
+
+        void main() {
+          float red = texture2D(tDiffuse, distort(vUv, uStrength * 1.04)).r;
+          float green = texture2D(tDiffuse, distort(vUv, uStrength)).g;
+          float blue = texture2D(tDiffuse, distort(vUv, uStrength * 0.96)).b;
+          gl_FragColor = vec4(red, green, blue, 1.0);
+        }
+      `,
+    });
+    composer.addPass(lensingPass);
     const bloomPass = new UnrealBloomPass(new THREE.Vector2(mount.clientWidth, mount.clientHeight), 0.38, 0.28, 1.0);
     composer.addPass(bloomPass);
+    const gradingPass = new ShaderPass({
+      uniforms: {
+        tDiffuse: { value: null },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D tDiffuse;
+        varying vec2 vUv;
+        void main() {
+          vec4 texel = texture2D(tDiffuse, vUv);
+          vec3 color = texel.rgb;
+          float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+          float shadows = 1.0 - smoothstep(0.0, 0.38, luma);
+          float highlights = smoothstep(0.55, 1.7, luma);
+          color = mix(color, color * vec3(0.8, 0.97, 1.2) + vec3(0.0, 0.004, 0.011), shadows * 0.5);
+          color = mix(color, color * vec3(1.07, 1.0, 0.9), highlights * 0.35);
+          float luma2 = dot(color, vec3(0.2126, 0.7152, 0.0722));
+          color = mix(vec3(luma2), color, 1.09);
+          gl_FragColor = vec4(color, texel.a);
+        }
+      `,
+    });
+    composer.addPass(gradingPass);
     composer.addPass(new OutputPass());
 
     const ambient = new THREE.HemisphereLight(0x5f8ecf, 0x0d0509, 0.85);
@@ -631,22 +705,28 @@ export function SpaceScene() {
           float core = 1.0 - smoothstep(0.30, 0.318, radius + gaseousWarp * 0.08);
 
           float ringDist = abs(radius + gaseousWarp * 0.05 - 0.335);
-          float photonCore = exp(-pow(ringDist * 110.0, 1.4));
-          float photonGlow = exp(-pow(ringDist * 30.0, 1.2));
-          float photonRing = photonCore * 2.0 + photonGlow * 0.5;
+          float photonCore = exp(-pow(ringDist * 150.0, 1.4));
+          float photonGlow = exp(-pow(ringDist * 34.0, 1.2));
+          float ringPulse = 1.0 + 0.08 * sin(uTime * 0.7) + 0.04 * sin(uTime * 0.23 + 2.1);
+          float photonRing = (photonCore * 1.9 + photonGlow * 0.38) * ringPulse;
 
           float tiltedY = q.y + q.x * 0.05;
           float diskWarp = gaseousWarp * smoothstep(0.25, 1.2, abs(q.x));
           float diskBand = exp(-pow(abs(tiltedY + diskWarp) * 15.0, 1.2));
           float hotSpine = exp(-pow(abs(tiltedY + diskWarp * 0.4) * 60.0, 1.05));
-          float diskReach = smoothstep(1.68, 0.3, abs(q.x));
+          float diskReach = smoothstep(1.42, 0.28, abs(q.x));
           float centerHeat = exp(-abs(q.x) * 1.7);
           float turbulence = 0.45 + flow * 0.9 + flowDetail * 0.35;
           float calm = 1.0 - uWarp * 0.32 - uProximity * 0.3;
           float diskCloud = diskBand * diskReach * turbulence;
           float disk = diskReach * (diskCloud * 0.6 + hotSpine * (1.1 + flowDetail * 0.8) * (0.5 + centerHeat * 1.15) * calm);
-          float doppler = mix(1.55, 0.5, smoothstep(-1.1, 1.1, q.x));
+          float doppler = mix(1.9, 0.38, smoothstep(-1.1, 1.1, q.x));
           disk *= doppler;
+
+          float spotAngle = uTime * 0.55;
+          float spotDelta = atan(sin(angle - spotAngle), cos(angle - spotAngle));
+          float flare = pow(max(0.0, sin(uTime * 0.16 + 1.3)), 18.0);
+          float hotspot = exp(-spotDelta * spotDelta * 9.0) * exp(-pow(abs(radius - 0.36) * 22.0, 1.4)) * (0.55 + flare * 1.7);
 
           float bentRadius = radius + gaseousWarp * 0.42;
           float archNoise = 0.3 + fbm(vec2(swirlCoord * 1.2, bentRadius * 9.0)) * 0.85;
@@ -664,7 +744,7 @@ export function SpaceScene() {
           float asymmetry = 0.5 + 0.5 * sin(angle * 2.2 - time * 1.5 + flow * 4.0);
           float halo = haloEnvelope * haloCells * asymmetry * 0.55;
 
-          float hotEnergy = disk * 1.2 + photonRing * (1.05 - uWarp * 0.15 - uProximity * 0.12) + upperArch * 0.6 + lowerArch + filamentEnergy * 0.85;
+          float hotEnergy = disk * 1.2 + photonRing * (1.05 - uWarp * 0.15 - uProximity * 0.12) + upperArch * 0.6 + lowerArch + filamentEnergy * 0.85 + hotspot * 0.9;
           float cloudEnergy = halo * (0.7 + uProximity * 0.25) + diskCloud * 0.3;
 
           vec3 ember = vec3(0.42, 0.05, 0.015);
@@ -673,7 +753,8 @@ export function SpaceScene() {
           vec3 whiteHot = vec3(1.0, 0.96, 0.88);
           vec3 hotColor = mix(amber, gold, smoothstep(0.3, 1.1, hotEnergy));
           hotColor = mix(hotColor, whiteHot, smoothstep(1.15, 2.4, hotEnergy));
-          hotColor = mix(hotColor, hotColor * vec3(0.96, 1.0, 1.12), (1.0 - smoothstep(-1.0, 0.2, q.x)) * 0.35);
+          hotColor = mix(hotColor, hotColor * vec3(0.94, 1.0, 1.16), (1.0 - smoothstep(-1.0, 0.2, q.x)) * 0.5);
+          hotColor = mix(hotColor, hotColor * vec3(1.05, 0.7, 0.48), smoothstep(0.15, 1.1, q.x) * 0.42);
           vec3 emberColor = mix(vec3(0.09, 0.02, 0.03), ember, flow) * 1.6;
 
           vec3 color = hotColor * hotEnergy + emberColor * cloudEnergy;
@@ -683,10 +764,10 @@ export function SpaceScene() {
           float arrivalFlash = smoothstep(0.88, 1.0, uApproach) * exp(-radius * radius * 4.5);
           color += whiteHot * arrivalFlash * 4.5;
 
-          float diskInFront = smoothstep(0.12, 0.5, disk);
-          color = mix(vec3(0.0, 0.001, 0.004), color, max(1.0 - core, diskInFront));
+          float diskInFront = smoothstep(0.3, 0.75, hotSpine * diskReach * calm);
+          color = mix(vec3(0.0, 0.0005, 0.002), color, max(1.0 - core, diskInFront));
           float alpha = max(core * 0.997, clamp(hotEnergy * 0.8 + cloudEnergy * 0.7 + arrivalFlash, 0.0, 1.0));
-          float edgeFade = (1.0 - smoothstep(0.84, 1.0, abs(p.x))) * (1.0 - smoothstep(0.82, 1.0, abs(p.y)));
+          float edgeFade = (1.0 - smoothstep(0.66, 0.97, abs(p.x))) * (1.0 - smoothstep(0.62, 0.96, abs(p.y)));
           alpha *= edgeFade;
 
           if (alpha < 0.012) discard;
@@ -927,6 +1008,9 @@ export function SpaceScene() {
 
     const timer = new THREE.Timer();
     timer.connect(document);
+    const lensProjCenter = new THREE.Vector3();
+    const lensProjEdge = new THREE.Vector3();
+    const lensRight = new THREE.Vector3();
     const streakCool = new THREE.Color(0x94cfff);
     const streakHot = new THREE.Color(0xff9a4a);
     const dustCool = new THREE.Color(0x76cfff);
@@ -1012,18 +1096,20 @@ export function SpaceScene() {
       const singularityTargetScale = THREE.MathUtils.lerp(1, 3.12, approach) + plunge * 3.2 + arrival * 0.72;
       const dampedSingularityScale = THREE.MathUtils.damp(singularity.scale.x, singularityTargetScale, 3.2, delta);
       singularity.scale.setScalar(dampedSingularityScale);
-      singularity.position.x = THREE.MathUtils.damp(singularity.position.x, THREE.MathUtils.lerp(5.3, 0, approach), 3.1, delta);
-      singularity.position.y = THREE.MathUtils.damp(singularity.position.y, THREE.MathUtils.lerp(3.15, 1.35, approach), 3.1, delta);
+      singularity.position.x = THREE.MathUtils.damp(singularity.position.x, THREE.MathUtils.lerp(5.3, 0.55, approach), 3.1, delta);
+      singularity.position.y = THREE.MathUtils.damp(singularity.position.y, THREE.MathUtils.lerp(3.15, 1.5, approach), 3.1, delta);
       singularity.position.z = THREE.MathUtils.damp(singularity.position.z, THREE.MathUtils.lerp(-18.5, -11.4, plunge), 2.75, delta);
       singularity.rotation.z = THREE.MathUtils.damp(singularity.rotation.z, THREE.MathUtils.lerp(-0.045, 0.025, approach), 2.8, delta);
 
-      const cameraShake = warp * (1 - arrival) * (reduceMotion ? 0 : 1);
+      const flare = Math.pow(Math.max(0, Math.sin(elapsed * 0.16 + 1.3)), 18);
+      const cameraShake = (warp * (1 - arrival) + flare * 0.85 * approach) * (reduceMotion ? 0 : 1);
       camera.position.x = THREE.MathUtils.damp(camera.position.x, pointer.x * 0.22 + Math.sin(elapsed * 29) * 0.016 * cameraShake, 1.9, delta);
       camera.position.y = THREE.MathUtils.damp(camera.position.y, 0.95 + pointer.y * 0.12 + Math.cos(elapsed * 25) * 0.013 * cameraShake, 1.9, delta);
-      const targetFov = 48 + warp * (1 - deepApproach) * 5.5 - deepApproach * 5.5 - arrival * 3;
+      const targetFov = 48 + warp * (1 - deepApproach) * 5.5 - deepApproach * 5.5 + arrival * 8;
       camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 3.2, delta);
       camera.updateProjectionMatrix();
       camera.lookAt(shipRig.position.x * 0.16, 0, -4);
+      camera.rotation.z += (reduceMotion ? 0 : warp * 0.018 + plunge * 0.045);
 
       const travelScale = reduceMotion ? 0.18 : 1;
       const warpSpeed = 1 + warp * warp * 12;
@@ -1067,8 +1153,19 @@ export function SpaceScene() {
       accretionLight.position.copy(singularity.position);
       accretionLight.intensity = THREE.MathUtils.lerp(22, 44, warp);
       holeRim.position.copy(singularity.position);
-      holeRim.intensity = 3.5 + warp * 5.5 + Math.sin(elapsed * 2.3) * 0.35 + arrival * 4;
-      bloomPass.strength = 0.34 + warp * 0.1 + arrival * 0.75;
+      holeRim.intensity = 3.5 + warp * 5.5 + Math.sin(elapsed * 2.3) * 0.35 + arrival * 4 + flare * 3;
+      bloomPass.strength = 0.34 + warp * 0.1 + arrival * 0.75 + flare * 0.06;
+      camera.updateMatrixWorld();
+      lensProjCenter.copy(singularity.position).project(camera);
+      lensRight.setFromMatrixColumn(camera.matrixWorld, 0);
+      lensProjEdge.copy(singularity.position).addScaledVector(lensRight, 1.7 * singularity.scale.x).project(camera);
+      const lensAspect = camera.aspect;
+      const lensDx = ((lensProjEdge.x - lensProjCenter.x) / 2) * lensAspect;
+      const lensDy = (lensProjEdge.y - lensProjCenter.y) / 2;
+      lensingPass.uniforms.uCenter.value.set((lensProjCenter.x + 1) / 2, (lensProjCenter.y + 1) / 2);
+      lensingPass.uniforms.uRadius.value = Math.sqrt(lensDx * lensDx + lensDy * lensDy);
+      lensingPass.uniforms.uStrength.value = 0.045 + approach * 0.12 + plunge * 0.1;
+      lensingPass.uniforms.uAspect.value = lensAspect;
       if (shell) {
         shell.style.setProperty("--journey-progress", scrollProgress.toFixed(4));
         shell.style.setProperty("--copy-opacity", String(1 - THREE.MathUtils.smoothstep(scrollProgress, 0.06, 0.32)));
@@ -1088,6 +1185,7 @@ export function SpaceScene() {
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
       composer.setSize(mount.clientWidth, mount.clientHeight);
       composer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+      lensingPass.uniforms.uAspect.value = camera.aspect;
     };
     window.addEventListener("resize", onResize);
 
