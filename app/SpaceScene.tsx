@@ -11,6 +11,9 @@ import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
 const MODEL_URL = "/models/voyager.glb";
+const SKYBOX_URL = "/textures/nebula-skybox.jpg";
+const SKYBOX_ROTATION_Y = 0;
+const SKYBOX_INTENSITY = 0.75;
 
 function createStars(count: number, spread: number, depth: number, size: number) {
   const geometry = new THREE.BufferGeometry();
@@ -437,6 +440,19 @@ export function SpaceScene() {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x020510);
     scene.fog = new THREE.FogExp2(0x01030a, 0.0145);
+
+    new THREE.TextureLoader().load(
+      SKYBOX_URL,
+      (texture) => {
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+        texture.colorSpace = THREE.SRGBColorSpace;
+        scene.background = texture;
+        scene.backgroundIntensity = SKYBOX_INTENSITY;
+        scene.backgroundRotation.set(0, SKYBOX_ROTATION_Y, 0);
+      },
+      undefined,
+      () => {},
+    );
 
     const camera = new THREE.PerspectiveCamera(48, mount.clientWidth / mount.clientHeight, 0.1, 150);
     camera.position.set(0, 0.95, 7.7);
@@ -1209,6 +1225,7 @@ export function SpaceScene() {
           object.material.dispose();
         }
       });
+      if (scene.background instanceof THREE.Texture) scene.background.dispose();
       envTarget.dispose();
       bloomPass.dispose();
       composer.dispose();
