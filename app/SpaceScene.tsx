@@ -12,6 +12,8 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
 const MODEL_URL = "/models/voyager.glb";
 const SKYBOX_URL = "/textures/nebula-skybox.jpg";
+const PUFF_ATLAS_URL = "/textures/puff-atlas.jpg";
+const DISK_TEXTURE_URL = "/textures/accretion-disk.jpg";
 const SKYBOX_ROTATION_Y = 0;
 const SKYBOX_INTENSITY = 0.75;
 
@@ -82,6 +84,7 @@ type FlowTrails = {
   lens: Float32Array;
   spans: Float32Array;
   depths: Float32Array;
+  zSpreads: Float32Array;
   dirs: Float32Array;
 };
 
@@ -96,6 +99,7 @@ function createFlowTrails(count: number, segments: number): FlowTrails {
   const lens = new Float32Array(count);
   const spans = new Float32Array(count);
   const depths = new Float32Array(count);
+  const zSpreads = new Float32Array(count);
   const dirs = new Float32Array(count);
   const ember = new THREE.Color(0xff5a1e);
   const gold = new THREE.Color(0xffc978);
@@ -103,19 +107,20 @@ function createFlowTrails(count: number, segments: number): FlowTrails {
   const color = new THREE.Color();
 
   for (let i = 0; i < count; i += 1) {
-    radii[i] = 1.62 + Math.pow(Math.random(), 1.55) * 6.3;
-    flatten[i] = THREE.MathUtils.randFloat(0.09, 0.3);
+    radii[i] = 1.62 + Math.pow(Math.random(), 1.35) * 4.8;
+    flatten[i] = THREE.MathUtils.randFloat(0.27, 0.37);
     speeds[i] = (1.7 / Math.pow(radii[i], 1.75)) * THREE.MathUtils.randFloat(0.7, 1.4);
     phases[i] = THREE.MathUtils.randFloat(0, Math.PI * 2);
     lens[i] = THREE.MathUtils.randFloat(0.03, 0.1);
     spans[i] = THREE.MathUtils.randFloat(0.7, 1.35);
     depths[i] = -0.05 - (i % 7) * 0.012;
+    zSpreads[i] = THREE.MathUtils.randFloatSpread(2);
     dirs[i] = Math.random() > 0.06 ? 1 : -1;
 
-    const heat = Math.pow(1 - (radii[i] - 1.62) / 6.3, 1.35);
+    const heat = Math.pow(1 - (radii[i] - 1.62) / 4.8, 1.35);
     color.lerpColors(ember, gold, heat);
     color.lerp(white, Math.max(0, heat - 0.62) * 1.6);
-    const intensity = 0.55 + heat * heat * 2.1;
+    const intensity = 0.6 + heat * heat * 2.4;
     for (let k = 0; k < segments; k += 1) {
       const headFade = Math.pow(1 - k / segments, 1.55);
       const tailFade = Math.pow(1 - (k + 1) / segments, 1.55);
@@ -144,12 +149,12 @@ function createFlowTrails(count: number, segments: number): FlowTrails {
   const lines = new THREE.LineSegments(geometry, material);
   lines.frustumCulled = false;
   lines.renderOrder = 0;
-  return { lines, count, segments, positions, radii, flatten, speeds, phases, lens, spans, depths, dirs };
+  return { lines, count, segments, positions, radii, flatten, speeds, phases, lens, spans, depths, zSpreads, dirs };
 }
 
-function updateFlowTrails(trails: FlowTrails, elapsed: number, intensity: number) {
+function updateFlowTrails(trails: FlowTrails, elapsed: number, intensity: number, tunnel: number) {
   const { count, segments, positions } = trails;
-  const arc = 0.05 + intensity * 1.05;
+  const arc = 0.09 + intensity * 1.35;
   for (let i = 0; i < count; i += 1) {
     const dir = trails.dirs[i];
     const radius = trails.radii[i];
@@ -158,7 +163,7 @@ function updateFlowTrails(trails: FlowTrails, elapsed: number, intensity: number
     const step = span / segments;
     const flatten = trails.flatten[i];
     const lensStrength = trails.lens[i];
-    const z = trails.depths[i];
+    const z = trails.depths[i] + trails.zSpreads[i] * tunnel;
     let px = 0;
     let py = 0;
     for (let k = 0; k <= segments; k += 1) {
@@ -186,7 +191,7 @@ function updateFlowTrails(trails: FlowTrails, elapsed: number, intensity: number
 }
 
 type DustDisk = {
-  points: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial>;
+  points: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial | THREE.ShaderMaterial>;
   positions: Float32Array;
   radii: Float32Array;
   angles: Float32Array;
@@ -194,6 +199,7 @@ type DustDisk = {
   flatten: Float32Array;
   lifts: Float32Array;
   depths: Float32Array;
+  zSpreads: Float32Array;
 };
 
 function createDustDisk(count: number, size: number, texture: THREE.Texture | null, opacity: number): DustDisk {
@@ -206,18 +212,20 @@ function createDustDisk(count: number, size: number, texture: THREE.Texture | nu
   const flatten = new Float32Array(count);
   const lifts = new Float32Array(count);
   const depths = new Float32Array(count);
+  const zSpreads = new Float32Array(count);
   const ember = new THREE.Color(0xff6a26);
   const gold = new THREE.Color(0xffd9a0);
   const color = new THREE.Color();
 
   for (let i = 0; i < count; i += 1) {
-    radii[i] = 1.66 + Math.pow(Math.random(), 1.45) * 7.2;
+    radii[i] = 1.66 + Math.pow(Math.random(), 1.45) * 5.4;
+    zSpreads[i] = THREE.MathUtils.randFloatSpread(2);
     angles[i] = THREE.MathUtils.randFloat(0, Math.PI * 2);
     speeds[i] = (1.5 / Math.pow(radii[i], 1.7)) * THREE.MathUtils.randFloat(0.6, 1.4) * (Math.random() > 0.05 ? 1 : -1);
-    flatten[i] = THREE.MathUtils.randFloat(0.1, 0.32);
+    flatten[i] = THREE.MathUtils.randFloat(0.26, 0.38);
     lifts[i] = THREE.MathUtils.randFloat(0.02, 0.1);
     depths[i] = THREE.MathUtils.randFloatSpread(0.5) - 0.1;
-    const heat = Math.pow(1 - (radii[i] - 1.66) / 7.2, 1.3);
+    const heat = Math.pow(1 - (radii[i] - 1.66) / 5.4, 1.3);
     color.lerpColors(ember, gold, heat * THREE.MathUtils.randFloat(0.5, 1));
     const intensity = 0.35 + heat * 1.1;
     colors[i * 3] = color.r * intensity;
@@ -242,10 +250,10 @@ function createDustDisk(count: number, size: number, texture: THREE.Texture | nu
   const points = new THREE.Points(geometry, material);
   points.frustumCulled = false;
   points.renderOrder = 0;
-  return { points, positions, radii, angles, speeds, flatten, lifts, depths };
+  return { points, positions, radii, angles, speeds, flatten, lifts, depths, zSpreads };
 }
 
-function updateDustDisk(dust: DustDisk, elapsed: number, intensity: number) {
+function updateDustDisk(dust: DustDisk, elapsed: number, intensity: number, tunnel: number) {
   const count = dust.radii.length;
   for (let i = 0; i < count; i += 1) {
     const angle = dust.angles[i] + elapsed * dust.speeds[i] * (0.25 + intensity * 1.9);
@@ -254,9 +262,162 @@ function updateDustDisk(dust: DustDisk, elapsed: number, intensity: number) {
     const lift = upper * upper * radius * dust.lifts[i];
     dust.positions[i * 3] = Math.cos(angle) * radius;
     dust.positions[i * 3 + 1] = Math.sin(angle) * radius * dust.flatten[i] + lift;
-    dust.positions[i * 3 + 2] = dust.depths[i];
+    dust.positions[i * 3 + 2] = dust.depths[i] + dust.zSpreads[i] * tunnel;
   }
   (dust.points.geometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
+}
+
+function createPuffCloud(count: number, texture: THREE.Texture, screenScale: number): DustDisk {
+  const geometry = new THREE.BufferGeometry();
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const tiles = new Float32Array(count);
+  const rotations = new Float32Array(count);
+  const sizes = new Float32Array(count);
+  const radii = new Float32Array(count);
+  const angles = new Float32Array(count);
+  const speeds = new Float32Array(count);
+  const flatten = new Float32Array(count);
+  const lifts = new Float32Array(count);
+  const depths = new Float32Array(count);
+  const zSpreads = new Float32Array(count);
+  const ember = new THREE.Color(0xe06a28);
+  const cream = new THREE.Color(0xffe4bb);
+  const color = new THREE.Color();
+
+  for (let i = 0; i < count; i += 1) {
+    radii[i] = 1.9 + Math.pow(Math.random(), 1.2) * 8.0;
+    zSpreads[i] = THREE.MathUtils.randFloatSpread(2);
+    angles[i] = THREE.MathUtils.randFloat(0, Math.PI * 2);
+    speeds[i] = (1.5 / Math.pow(radii[i], 1.7)) * THREE.MathUtils.randFloat(0.6, 1.4) * (Math.random() > 0.05 ? 1 : -1);
+    flatten[i] = THREE.MathUtils.randFloat(0.28, 0.34);
+    lifts[i] = THREE.MathUtils.randFloat(0.02, 0.08);
+    depths[i] = THREE.MathUtils.randFloatSpread(0.4) - 0.1;
+    tiles[i] = Math.floor(Math.random() * 16);
+    rotations[i] = angles[i] + Math.PI / 2 + THREE.MathUtils.randFloatSpread(0.5);
+    sizes[i] = THREE.MathUtils.randFloat(0.9, 2.2);
+    const heat = Math.pow(1 - (radii[i] - 1.9) / 8.0, 1.15);
+    color.lerpColors(ember, cream, Math.min(1, heat * THREE.MathUtils.randFloat(0.75, 1.25)));
+    const intensity = 0.7 + heat * 1.7;
+    colors[i * 3] = color.r * intensity;
+    colors[i * 3 + 1] = color.g * intensity;
+    colors[i * 3 + 2] = color.b * intensity;
+  }
+
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
+  geometry.setAttribute("aTile", new THREE.BufferAttribute(tiles, 1));
+  geometry.setAttribute("aRot", new THREE.BufferAttribute(rotations, 1));
+  geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
+
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uMap: { value: texture },
+      uOpacity: { value: 0 },
+      uScale: { value: screenScale },
+      uSize: { value: 1.45 },
+    },
+    vertexShader: `
+      attribute vec3 aColor;
+      attribute float aTile;
+      attribute float aRot;
+      attribute float aSize;
+      uniform float uScale;
+      uniform float uSize;
+      varying vec3 vColor;
+      varying float vTile;
+      varying float vRot;
+      void main() {
+        vColor = aColor;
+        vTile = aTile;
+        vRot = aRot;
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = uSize * aSize * (uScale / -mvPosition.z);
+        gl_Position = projectionMatrix * mvPosition;
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D uMap;
+      uniform float uOpacity;
+      varying vec3 vColor;
+      varying float vTile;
+      varying float vRot;
+      void main() {
+        vec2 centered = gl_PointCoord - 0.5;
+        float c = cos(vRot);
+        float s = sin(vRot);
+        vec2 rotated = vec2(centered.x * c - centered.y * s, centered.x * s + centered.y * c);
+        float mask = 1.0 - smoothstep(0.3, 0.5, length(rotated));
+        if (mask < 0.004) discard;
+        vec2 local = clamp(rotated + 0.5, 0.0, 1.0);
+        float col = mod(vTile, 4.0);
+        float row = floor(vTile / 4.0);
+        vec2 uv = (vec2(col, row) + local) * 0.25;
+        vec3 tex = texture2D(uMap, uv).rgb;
+        gl_FragColor = vec4(tex * vColor * uOpacity * mask, 1.0);
+      }
+    `,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+  });
+  material.fog = false;
+
+  const points = new THREE.Points(geometry, material);
+  points.frustumCulled = false;
+  points.renderOrder = 0;
+  return { points, positions, radii, angles, speeds, flatten, lifts, depths, zSpreads };
+}
+
+function createDiskHalf(texture: THREE.Texture, thetaStart: number): THREE.Mesh<THREE.RingGeometry, THREE.ShaderMaterial> {
+  const geometry = new THREE.RingGeometry(1.5, 9.4, 160, 1, thetaStart, Math.PI);
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uMap: { value: texture },
+      uTime: { value: 0 },
+      uSpeed: { value: 0.1 },
+      uOpacity: { value: 0 },
+    },
+    vertexShader: `
+      varying vec2 vPos;
+      void main() {
+        vPos = position.xy;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D uMap;
+      uniform float uTime;
+      uniform float uSpeed;
+      uniform float uOpacity;
+      varying vec2 vPos;
+      void main() {
+        float r = length(vPos);
+        float theta = atan(vPos.y, vPos.x);
+        float omega = 1.6 / pow(max(r, 0.8), 1.5);
+        float sheared = theta - uTime * uSpeed * omega;
+        vec2 flowPos = vec2(cos(sheared), sin(sheared)) * r;
+        vec2 uv = flowPos / 19.0 + 0.5;
+        vec3 tex = texture2D(uMap, uv).rgb;
+        float side = vPos.x / max(r, 0.001);
+        float doppler = mix(1.65, 0.42, smoothstep(-1.0, 1.0, side));
+        vec3 color = tex * doppler;
+        color = mix(color, color * vec3(0.95, 1.0, 1.1), (1.0 - smoothstep(-1.0, 0.0, side)) * 0.3);
+        float inner = smoothstep(1.5, 2.1, r);
+        float outer = 1.0 - smoothstep(7.4, 9.4, r);
+        gl_FragColor = vec4(color * (uOpacity * inner * outer), 1.0);
+      }
+    `,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+  });
+  material.fog = false;
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.frustumCulled = false;
+  return mesh;
 }
 
 function createSparkTexture() {
@@ -636,10 +797,23 @@ export function SpaceScene() {
     singularity.position.set(5.3, 3.15, -18.5);
     singularity.rotation.z = -0.045;
 
-    const flowTrails = createFlowTrails(620, 12);
-    const dustFine = createDustDisk(1500, 0.085, sparkTexture, 0.24);
-    const dustPuffs = createDustDisk(260, 0.62, sparkTexture, 0.08);
-    singularity.add(flowTrails.lines, dustFine.points, dustPuffs.points);
+    const dustFine = createDustDisk(2600, 0.085, sparkTexture, 0.12);
+    const puffTexture = new THREE.TextureLoader().load(PUFF_ATLAS_URL);
+    puffTexture.colorSpace = THREE.SRGBColorSpace;
+    const puffScreenScale = () => mount.clientHeight * 0.5 * Math.min(window.devicePixelRatio, 1.5);
+    const dustPuffs = createPuffCloud(720, puffTexture, puffScreenScale());
+    singularity.add(dustFine.points, dustPuffs.points);
+
+    const diskTexture = new THREE.TextureLoader().load(DISK_TEXTURE_URL);
+    diskTexture.colorSpace = THREE.SRGBColorSpace;
+    const diskGroup = new THREE.Group();
+    diskGroup.rotation.x = -1.265;
+    const diskFar = createDiskHalf(diskTexture, 0);
+    diskFar.renderOrder = 1;
+    const diskNear = createDiskHalf(diskTexture, Math.PI);
+    diskNear.renderOrder = 3;
+    diskGroup.add(diskFar, diskNear);
+    singularity.add(diskGroup);
 
     const swirlMaterial = new THREE.SpriteMaterial({
       map: accretionRibbonTexture ?? undefined,
@@ -721,21 +895,21 @@ export function SpaceScene() {
           float core = 1.0 - smoothstep(0.30, 0.318, radius + gaseousWarp * 0.08);
 
           float ringDist = abs(radius + gaseousWarp * 0.05 - 0.335);
-          float photonCore = exp(-pow(ringDist * 150.0, 1.4));
-          float photonGlow = exp(-pow(ringDist * 34.0, 1.2));
+          float photonCore = exp(-pow(ringDist * 175.0, 1.4));
+          float photonGlow = exp(-pow(ringDist * 40.0, 1.2));
           float ringPulse = 1.0 + 0.08 * sin(uTime * 0.7) + 0.04 * sin(uTime * 0.23 + 2.1);
-          float photonRing = (photonCore * 1.9 + photonGlow * 0.38) * ringPulse;
+          float photonRing = (photonCore * 1.65 + photonGlow * 0.26) * ringPulse;
 
           float tiltedY = q.y + q.x * 0.05;
           float diskWarp = gaseousWarp * smoothstep(0.25, 1.2, abs(q.x));
-          float diskBand = exp(-pow(abs(tiltedY + diskWarp) * 15.0, 1.2));
+          float diskBand = exp(-pow(abs(tiltedY + diskWarp) * 7.0, 1.35));
           float hotSpine = exp(-pow(abs(tiltedY + diskWarp * 0.4) * 60.0, 1.05));
           float diskReach = smoothstep(1.42, 0.28, abs(q.x));
           float centerHeat = exp(-abs(q.x) * 1.7);
-          float turbulence = 0.45 + flow * 0.9 + flowDetail * 0.35;
+          float turbulence = 0.6 + flow * 0.55 + flowDetail * 0.2;
           float calm = 1.0 - uWarp * 0.32 - uProximity * 0.3;
           float diskCloud = diskBand * diskReach * turbulence;
-          float disk = diskReach * (diskCloud * 0.6 + hotSpine * (1.1 + flowDetail * 0.8) * (0.5 + centerHeat * 1.15) * calm);
+          float disk = diskReach * (diskCloud * 0.45 + hotSpine * (1.1 + flowDetail * 0.8) * (0.5 + centerHeat * 1.15) * calm);
           float doppler = mix(1.9, 0.38, smoothstep(-1.1, 1.1, q.x));
           disk *= doppler;
 
@@ -745,9 +919,9 @@ export function SpaceScene() {
           float hotspot = exp(-spotDelta * spotDelta * 9.0) * exp(-pow(abs(radius - 0.36) * 22.0, 1.4)) * (0.55 + flare * 1.7);
 
           float bentRadius = radius + gaseousWarp * 0.42;
-          float archNoise = 0.3 + fbm(vec2(swirlCoord * 1.2, bentRadius * 9.0)) * 0.85;
-          float upperArch = exp(-pow(abs(bentRadius - 0.5) * 12.0, 1.25)) * smoothstep(-0.05, 0.3, q.y) * archNoise;
-          float lowerArch = exp(-pow(abs(bentRadius - 0.42) * 14.0, 1.3)) * smoothstep(0.03, -0.28, q.y) * archNoise * 0.45;
+          float archNoise = 0.42 + fbm(vec2(swirlCoord * 1.2, bentRadius * 9.0)) * 0.7;
+          float upperArch = exp(-pow(abs(bentRadius - 0.5) * 9.5, 1.3)) * smoothstep(-0.05, 0.3, q.y) * archNoise;
+          float lowerArch = exp(-pow(abs(bentRadius - 0.42) * 11.0, 1.3)) * smoothstep(0.03, -0.28, q.y) * archNoise * 0.55;
 
           float threadPhase = radius * 26.0 - angle * 4.0 - time * 11.0 + flow * 6.0;
           float spiralThreads = pow(0.5 + 0.5 * sin(threadPhase), 6.0);
@@ -760,7 +934,7 @@ export function SpaceScene() {
           float asymmetry = 0.5 + 0.5 * sin(angle * 2.2 - time * 1.5 + flow * 4.0);
           float halo = haloEnvelope * haloCells * asymmetry * 0.55;
 
-          float hotEnergy = disk * 1.2 + photonRing * (1.05 - uWarp * 0.15 - uProximity * 0.12) + upperArch * 0.6 + lowerArch + filamentEnergy * 0.85 + hotspot * 0.9;
+          float hotEnergy = disk * 1.2 + photonRing * (1.05 - uWarp * 0.15 - uProximity * 0.12) + upperArch * 0.85 + lowerArch + filamentEnergy * 0.6 + hotspot * 0.9;
           float cloudEnergy = halo * (0.7 + uProximity * 0.25) + diskCloud * 0.3;
 
           vec3 ember = vec3(0.42, 0.05, 0.015);
@@ -774,7 +948,7 @@ export function SpaceScene() {
           vec3 emberColor = mix(vec3(0.09, 0.02, 0.03), ember, flow) * 1.6;
 
           vec3 color = hotColor * hotEnergy + emberColor * cloudEnergy;
-          color += vec3(1.0, 0.88, 0.62) * photonCore * (1.1 - uWarp * 0.35 - uProximity * 0.25);
+          color += vec3(1.0, 0.88, 0.62) * photonCore * (0.85 - uWarp * 0.3 - uProximity * 0.2);
           color += whiteHot * hotSpine * diskReach * centerHeat * doppler * 0.7 * calm * calm;
 
           float arrivalFlash = smoothstep(0.88, 1.0, uApproach) * exp(-radius * radius * 4.5);
@@ -1114,13 +1288,14 @@ export function SpaceScene() {
       singularity.scale.setScalar(dampedSingularityScale);
       singularity.position.x = THREE.MathUtils.damp(singularity.position.x, THREE.MathUtils.lerp(5.3, 0.55, approach), 3.1, delta);
       singularity.position.y = THREE.MathUtils.damp(singularity.position.y, THREE.MathUtils.lerp(3.15, 1.5, approach), 3.1, delta);
-      singularity.position.z = THREE.MathUtils.damp(singularity.position.z, THREE.MathUtils.lerp(-18.5, -11.4, plunge), 2.75, delta);
+      singularity.position.z = THREE.MathUtils.damp(singularity.position.z, THREE.MathUtils.lerp(-18.5, -8.2, plunge), 2.75, delta);
       singularity.rotation.z = THREE.MathUtils.damp(singularity.rotation.z, THREE.MathUtils.lerp(-0.045, 0.025, approach), 2.8, delta);
 
       const flare = Math.pow(Math.max(0, Math.sin(elapsed * 0.16 + 1.3)), 18);
       const cameraShake = (warp * (1 - arrival) + flare * 0.85 * approach) * (reduceMotion ? 0 : 1);
       camera.position.x = THREE.MathUtils.damp(camera.position.x, pointer.x * 0.22 + Math.sin(elapsed * 29) * 0.016 * cameraShake, 1.9, delta);
       camera.position.y = THREE.MathUtils.damp(camera.position.y, 0.95 + pointer.y * 0.12 + Math.cos(elapsed * 25) * 0.013 * cameraShake, 1.9, delta);
+      camera.position.z = THREE.MathUtils.damp(camera.position.z, 7.7 - warp * 0.6 - plunge * 2.6, 2.5, delta);
       const targetFov = 48 + warp * (1 - deepApproach) * 5.5 - deepApproach * 5.5 + arrival * 8;
       camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 3.2, delta);
       camera.updateProjectionMatrix();
@@ -1135,15 +1310,19 @@ export function SpaceScene() {
       (streaks.lines.material as THREE.LineBasicMaterial).opacity = THREE.MathUtils.lerp(0.3, 0.72, warp) * (1 - arrival * 0.35);
       (streaks.lines.material as THREE.LineBasicMaterial).color.lerpColors(streakCool, streakHot, warp);
       (nearDust.points.material as THREE.PointsMaterial).color.lerpColors(dustCool, dustHot, warp);
-      updateFlowTrails(flowTrails, elapsed, warp);
-      updateDustDisk(dustFine, elapsed, warp);
-      updateDustDisk(dustPuffs, elapsed, warp);
+      const tunnel = deepApproach * 4.5;
+      updateDustDisk(dustFine, elapsed, warp, tunnel);
+      updateDustDisk(dustPuffs, elapsed, warp, tunnel);
       const ringFade = 1 - THREE.MathUtils.smoothstep(plunge, 0.02, 0.42);
-      flowTrails.lines.material.opacity = (0.1 + warp * 0.32) * (1 - arrival * 0.4);
-      dustFine.points.material.opacity = (0.2 + warp * 0.34) * (1 - arrival * 0.45);
-      dustPuffs.points.material.opacity = (0.07 + warp * 0.1) * (1 - arrival * 0.45);
+      dustFine.points.material.opacity = (0.07 + warp * 0.1) * (1 - arrival * 0.45);
+      (dustPuffs.points.material as THREE.ShaderMaterial).uniforms.uOpacity.value = (0.06 + deepApproach * 0.22) * (1 - arrival * 0.45);
+      [diskFar, diskNear].forEach((half) => {
+        half.material.uniforms.uTime.value = elapsed;
+        half.material.uniforms.uSpeed.value = 0.1 + warp * 0.4;
+        half.material.uniforms.uOpacity.value = (0.8 + warp * 0.3) * (1 - arrival * 0.5);
+      });
       accretionSwirl.material.rotation = Math.sin(elapsed * 0.075) * 0.018;
-      accretionSwirl.material.opacity = 0.12 * (1 - THREE.MathUtils.smoothstep(warp, 0.15, 0.6));
+      accretionSwirl.material.opacity = 0;
       corona.material.opacity = THREE.MathUtils.lerp(0.1, 0.04, plunge);
       proximitySprites.forEach((sprite) => {
         sprite.material.opacity = sprite.userData.baseOpacity * ringFade;
@@ -1202,6 +1381,7 @@ export function SpaceScene() {
       composer.setSize(mount.clientWidth, mount.clientHeight);
       composer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
       lensingPass.uniforms.uAspect.value = camera.aspect;
+      (dustPuffs.points.material as THREE.ShaderMaterial).uniforms.uScale.value = puffScreenScale();
     };
     window.addEventListener("resize", onResize);
 
@@ -1226,6 +1406,8 @@ export function SpaceScene() {
         }
       });
       if (scene.background instanceof THREE.Texture) scene.background.dispose();
+      diskTexture.dispose();
+      puffTexture.dispose();
       envTarget.dispose();
       bloomPass.dispose();
       composer.dispose();
